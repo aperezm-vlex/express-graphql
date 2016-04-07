@@ -8,10 +8,20 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  */
 
-type GraphiQLData = { query: ?string, variables: ?Object, result?: Object };
+type GraphiQLData = {
+  query: ?string,
+  variables: ?Object,
+  operationName: ?string,
+  result?: Object
+};
 
 // Current latest version of GraphiQL.
-const GRAPHIQL_VERSION = '0.4.4';
+const GRAPHIQL_VERSION = '0.6.6';
+
+// Ensures string values are save to be used within a <script> tag.
+function safeSerialize(data) {
+  return data ? JSON.stringify(data).replace(/\//g, '\\/') : null;
+}
 
 /**
  * When express-graphql receives a request which does not Accept JSON, but does
@@ -26,6 +36,7 @@ export function renderGraphiQL(data: GraphiQLData): string {
     data.variables ? JSON.stringify(data.variables, null, 2) : null;
   const resultString =
     data.result ? JSON.stringify(data.result, null, 2) : null;
+  const operationName = data.operationName;
 
   /* eslint-disable max-len */
   return `<!--
@@ -39,10 +50,18 @@ add "&raw" to the end of the URL within a browser.
 <!DOCTYPE html>
 <html>
 <head>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+    }
+  </style>
   <link href="//cdn.jsdelivr.net/graphiql/${GRAPHIQL_VERSION}/graphiql.css" rel="stylesheet" />
   <script src="//cdn.jsdelivr.net/fetch/0.9.0/fetch.min.js"></script>
-  <script src="//cdn.jsdelivr.net/react/0.14.2/react.min.js"></script>
-  <script src="//cdn.jsdelivr.net/react/0.14.2/react-dom.min.js"></script>
+  <script src="//cdn.jsdelivr.net/react/0.14.7/react.min.js"></script>
+  <script src="//cdn.jsdelivr.net/react/0.14.7/react-dom.min.js"></script>
   <script src="//cdn.jsdelivr.net/graphiql/${GRAPHIQL_VERSION}/graphiql.min.js"></script>
 </head>
 <body>
@@ -91,7 +110,13 @@ add "&raw" to the end of the URL within a browser.
         body: JSON.stringify(graphQLParams),
         credentials: 'include',
       }).then(function (response) {
-        return response.json();
+        return response.text();
+      }).then(function (responseBody) {
+        try {
+          return JSON.parse(responseBody);
+        } catch (error) {
+          return responseBody;
+        }
       });
     }
 
@@ -107,6 +132,11 @@ add "&raw" to the end of the URL within a browser.
       updateURL();
     }
 
+    function onEditOperationName(newOperationName) {
+      parameters.operationName = newOperationName;
+      updateURL();
+    }
+
     function updateURL() {
       history.replaceState(null, null, locationQuery(parameters));
     }
@@ -117,9 +147,11 @@ add "&raw" to the end of the URL within a browser.
         fetcher: graphQLFetcher,
         onEditQuery: onEditQuery,
         onEditVariables: onEditVariables,
-        query: ${JSON.stringify(queryString)},
-        response: ${JSON.stringify(resultString)},
-        variables: ${JSON.stringify(variablesString)}
+        onEditOperationName: onEditOperationName,
+        query: ${safeSerialize(queryString)},
+        response: ${safeSerialize(resultString)},
+        variables: ${safeSerialize(variablesString)},
+        operationName: ${safeSerialize(operationName)},
       }),
       document.body
     );

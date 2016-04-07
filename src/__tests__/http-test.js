@@ -24,7 +24,9 @@ import {
   GraphQLSchema,
   GraphQLObjectType,
   GraphQLNonNull,
-  GraphQLString
+  GraphQLString,
+  GraphQLError,
+  BREAK
 } from 'graphql';
 import graphqlHTTP from '../';
 
@@ -209,11 +211,11 @@ describe('test harness', () => {
         expect(JSON.parse(error.response.text)).to.deep.equal({
           errors: [
             {
-              message: 'Cannot query field "unknownOne" on "QueryRoot".',
+              message: 'Cannot query field "unknownOne" on type "QueryRoot".',
               locations: [ { line: 1, column: 9 } ]
             },
             {
-              message: 'Cannot query field "unknownTwo" on "QueryRoot".',
+              message: 'Cannot query field "unknownTwo" on type "QueryRoot".',
               locations: [ { line: 1, column: 21 } ]
             }
           ]
@@ -797,8 +799,7 @@ describe('test harness', () => {
         var app = express();
 
         app.use(urlString(), graphqlHTTP({
-          schema: TestSchema,
-          pretty: true
+          schema: TestSchema
         }));
 
         var response = await request(app)
@@ -816,12 +817,65 @@ describe('test harness', () => {
         });
       });
 
+      it('allows for custom error formatting to sanitize', async () => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          formatError(error) {
+            return { message: 'Custom error format: ' + error.message };
+          }
+        }));
+
+        var response = await request(app)
+          .get(urlString({
+            query: '{thrower}',
+          }));
+
+        expect(response.status).to.equal(200);
+        expect(JSON.parse(response.text)).to.deep.equal({
+          data: null,
+          errors: [ {
+            message: 'Custom error format: Throws!',
+          } ]
+        });
+      });
+
+      it('allows for custom error formatting to elaborate', async () => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          formatError(error) {
+            return {
+              message: error.message,
+              locations: error.locations,
+              stack: 'Stack trace'
+            };
+          }
+        }));
+
+        var response = await request(app)
+          .get(urlString({
+            query: '{thrower}',
+          }));
+
+        expect(response.status).to.equal(200);
+        expect(JSON.parse(response.text)).to.deep.equal({
+          data: null,
+          errors: [ {
+            message: 'Throws!',
+            locations: [ { line: 1, column: 2 } ],
+            stack: 'Stack trace',
+          } ]
+        });
+      });
+
       it('handles syntax errors caught by GraphQL', async () => {
         var app = express();
 
         app.use(urlString(), graphqlHTTP({
           schema: TestSchema,
-          pretty: true
         }));
 
         var error = await catchError(
@@ -846,7 +900,6 @@ describe('test harness', () => {
 
         app.use(urlString(), graphqlHTTP({
           schema: TestSchema,
-          pretty: true
         }));
 
         var error = await catchError(
@@ -864,7 +917,6 @@ describe('test harness', () => {
 
         app.use(urlString(), graphqlHTTP({
           schema: TestSchema,
-          pretty: true
         }));
 
         var error = await catchError(
@@ -885,7 +937,6 @@ describe('test harness', () => {
 
         app.use(urlString(), graphqlHTTP({
           schema: TestSchema,
-          pretty: true
         }));
 
         var error = await catchError(
@@ -1079,6 +1130,69 @@ describe('test harness', () => {
         );
       });
 
+      it('contains a pre-run operation name within GraphiQL', async () => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          graphiql: true
+        }));
+
+        var response = await request(app)
+          .get(urlString({
+            query: 'query A{a:test} query B{b:test}',
+            operationName: 'B'
+          }))
+          .set('Accept', 'text/html');
+
+        expect(response.status).to.equal(200);
+        expect(response.type).to.equal('text/html');
+        expect(response.text).to.include(
+          'response: ' + JSON.stringify(
+            JSON.stringify({ data: { b: 'Hello World' } }, null, 2)
+          )
+        );
+        expect(response.text).to.include('operationName: "B"');
+      });
+
+      it('escapes HTML in queries within GraphiQL', async () => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          graphiql: true
+        }));
+
+        var error = await catchError(
+          request(app).get(urlString({ query: '</script><script>alert(1)</script>' }))
+                      .set('Accept', 'text/html')
+        );
+
+        expect(error.response.status).to.equal(400);
+        expect(error.response.type).to.equal('text/html');
+        expect(error.response.text).to.not.include('</script><script>alert(1)</script>');
+      });
+
+      it('escapes HTML in variables within GraphiQL', async () => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          graphiql: true
+        }));
+
+        var response = await request(app).get(urlString({
+          query: 'query helloWho($who: String) { test(who: $who) }',
+          variables: JSON.stringify({
+            who: '</script><script>alert(1)</script>'
+          })
+        })) .set('Accept', 'text/html');
+
+        expect(response.status).to.equal(200);
+        expect(response.type).to.equal('text/html');
+        expect(response.text).to.not.include('</script><script>alert(1)</script>');
+      });
+
       it('GraphiQL renders provided variables', async () => {
         var app = express();
 
@@ -1214,6 +1328,46 @@ describe('test harness', () => {
         expect(response.text).to.equal(
           '{"data":{"test":"Hello World"}}'
         );
+      });
+    });
+
+    describe('Custom validation rules', () => {
+      var AlwaysInvalidRule = function (context) {
+        return {
+          enter() {
+            context.reportError(new GraphQLError(
+              'AlwaysInvalidRule was really invalid!'
+            ));
+            return BREAK;
+          }
+        };
+      };
+
+      it('Do not execute a query if it do not pass the custom validation.', async() => {
+        var app = express();
+
+        app.use(urlString(), graphqlHTTP({
+          schema: TestSchema,
+          validationRules: [ AlwaysInvalidRule ],
+          pretty: true,
+        }));
+
+        var error = await catchError(
+          request(app)
+            .get(urlString({
+              query: '{thrower}',
+            }))
+        );
+
+        expect(error.response.status).to.equal(400);
+        expect(JSON.parse(error.response.text)).to.deep.equal({
+          errors: [
+            {
+              message: 'AlwaysInvalidRule was really invalid!'
+            },
+          ]
+        });
+
       });
     });
   });

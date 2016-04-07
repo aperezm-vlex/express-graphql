@@ -8,15 +8,22 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  */
 
+import {
+  Source,
+  parse,
+  validate,
+  execute,
+  formatError,
+  getOperationAST,
+  specifiedRules
+} from 'graphql';
 import httpError from 'http-errors';
-import { formatError } from 'graphql/error';
-import { execute } from 'graphql/execution';
-import { parse, Source } from 'graphql/language';
-import { validate } from 'graphql/validation';
-import { getOperationAST } from 'graphql/utilities/getOperationAST';
+
 import { parseBody } from './parseBody';
 import { renderGraphiQL } from './renderGraphiQL';
+
 import type { Request, Response } from 'express';
+
 
 /**
  * Used to configure the graphQLHTTP middleware by providing a schema
@@ -40,7 +47,20 @@ export type OptionsObj = {
   pretty?: ?boolean,
 
   /**
-   * A boolean to optionally enable GraphiQL mode
+   * An optional function which will be used to format any errors produced by
+   * fulfilling a GraphQL operation. If no function is provided, GraphQL's
+   * default spec-compliant `formatError` function will be used.
+   */
+  formatError?: ?Function,
+
+  /**
+   * An optional array of validation rules that will be applied on the document
+   * in additional to those defined by the GraphQL spec.
+   */
+  validationRules?: ?Array<any>,
+
+  /**
+   * A boolean to optionally enable GraphiQL mode.
    */
   graphiql?: ?boolean,
 };
@@ -63,10 +83,12 @@ export default function graphqlHTTP(options: Options): Middleware {
     let rootValue;
     let pretty;
     let graphiql;
+    let formatErrorFn;
     let showGraphiQL;
     let query;
     let variables;
     let operationName;
+    let validationRules;
 
     // Use promises as a mechanism for capturing any thrown errors during the
     // asyncronous process.
@@ -78,6 +100,12 @@ export default function graphqlHTTP(options: Options): Middleware {
       rootValue = optionsObj.rootValue;
       pretty = optionsObj.pretty;
       graphiql = optionsObj.graphiql;
+      formatErrorFn = optionsObj.formatError;
+
+      validationRules = specifiedRules;
+      if (optionsObj.validationRules) {
+        validationRules = validationRules.concat(optionsObj.validationRules);
+      }
 
       // GraphQL HTTP only supports GET and POST methods.
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -121,7 +149,7 @@ export default function graphqlHTTP(options: Options): Middleware {
       }
 
       // Validate AST, reporting any errors.
-      const validationErrors = validate(schema, documentAST);
+      const validationErrors = validate(schema, documentAST, validationRules);
       if (validationErrors.length > 0) {
         // Return 400: Bad Request if any validation errors exist.
         response.status(400);
@@ -172,7 +200,7 @@ export default function graphqlHTTP(options: Options): Middleware {
     }).then(result => {
       // Format any encountered errors.
       if (result && result.errors) {
-        result.errors = result.errors.map(formatError);
+        result.errors = result.errors.map(formatErrorFn || formatError);
       }
 
       // Add timing information to response
@@ -184,7 +212,7 @@ export default function graphqlHTTP(options: Options): Middleware {
       if (showGraphiQL) {
         response
           .set('Content-Type', 'text/html')
-          .send(renderGraphiQL({ query, variables, result }));
+          .send(renderGraphiQL({ query, variables, operationName, result }));
       } else {
         // Otherwise, present JSON directly.
         response

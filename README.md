@@ -1,7 +1,7 @@
 GraphQL Express Middleware
 ==========================
 
-[![Build Status](https://travis-ci.org/graphql/express-graphql.svg)](https://travis-ci.org/graphql/express-graphql)
+[![Build Status](https://travis-ci.org/graphql/express-graphql.svg?branch=master)](https://travis-ci.org/graphql/express-graphql)
 [![Coverage Status](https://coveralls.io/repos/graphql/express-graphql/badge.svg?branch=master&service=github)](https://coveralls.io/github/graphql/express-graphql?branch=master)
 
 Create a GraphQL HTTP server with [Express](http://expressjs.com).
@@ -33,8 +33,30 @@ The `graphqlHTTP` function accepts the following options:
 
   * **`pretty`**: If `true`, any JSON response will be pretty-printed.
 
+  * **`formatError`**: An optional function which will be used to format any
+    errors produced by fulfilling a GraphQL operation. If no function is
+    provided, GraphQL's default spec-compliant [`formatError`][] function will
+    be used.
+
+  * **`validationRules`**: Optional additional validation rules queries must
+    satisfy in addition to those defined by the GraphQL spec.
+
   * **`graphiql`**: If `true`, may present [GraphiQL][] when loaded directly
     from a browser (a useful tool for debugging and exploration).
+
+
+#### Debugging
+
+During development, it's useful to get more information from errors, such as
+stack traces. Providing a function to `formatError` enables this:
+
+```js
+formatError: error => ({
+  message: error.message,
+  locations: error.locations,
+  stack: error.stack
+})
+```
 
 
 ### HTTP Usage
@@ -124,6 +146,7 @@ new GraphQLObjectType({
 ```
 
 [`graphql-js`]: https://github.com/graphql/graphql-js
+[`formatError`]: https://github.com/graphql/graphql-js/blob/master/src/error/formatError.js
 [GraphiQL]: https://github.com/graphql/graphiql
 [`multer`]: https://github.com/expressjs/multer
 [`express-session`]: https://github.com/expressjs/session
