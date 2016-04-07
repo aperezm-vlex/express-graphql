@@ -178,6 +178,7 @@ export default function graphqlHTTP(options: Options): Middleware {
         }
       }
 
+      rootValue && (rootValue.startedAt = new Date().getTime());
       // Perform the execution, reporting any errors creating the context.
       try {
         return execute(
@@ -200,6 +201,11 @@ export default function graphqlHTTP(options: Options): Middleware {
       // Format any encountered errors.
       if (result && result.errors) {
         result.errors = result.errors.map(formatErrorFn || formatError);
+      }
+
+      // Add timing information to response
+      if (rootValue && rootValue.response && rootValue.response.timing) {
+        result.timing = Object.assign({duration: (new Date().getTime() - rootValue.startedAt) / 1000}, rootValue.response.timing);
       }
 
       // If allowed to show GraphiQL, present it instead of JSON.
