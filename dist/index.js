@@ -21,19 +21,11 @@ exports['default'] = graphqlHTTP;
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
 
+var _graphql = require('graphql');
+
 var _httpErrors = require('http-errors');
 
 var _httpErrors2 = _interopRequireDefault(_httpErrors);
-
-var _graphqlError = require('graphql/error');
-
-var _graphqlExecution = require('graphql/execution');
-
-var _graphqlLanguage = require('graphql/language');
-
-var _graphqlValidation = require('graphql/validation');
-
-var _graphqlUtilitiesGetOperationAST = require('graphql/utilities/getOperationAST');
 
 var _parseBody = require('./parseBody');
 
@@ -56,10 +48,12 @@ function graphqlHTTP(options) {
     var rootValue = undefined;
     var pretty = undefined;
     var graphiql = undefined;
+    var formatErrorFn = undefined;
     var showGraphiQL = undefined;
     var query = undefined;
     var variables = undefined;
     var operationName = undefined;
+    var validationRules = undefined;
 
     // Use promises as a mechanism for capturing any thrown errors during the
     // asyncronous process.
@@ -71,6 +65,12 @@ function graphqlHTTP(options) {
       rootValue = optionsObj.rootValue;
       pretty = optionsObj.pretty;
       graphiql = optionsObj.graphiql;
+      formatErrorFn = optionsObj.formatError;
+
+      validationRules = _graphql.specifiedRules;
+      if (optionsObj.validationRules) {
+        validationRules = validationRules.concat(optionsObj.validationRules);
+      }
 
       // GraphQL HTTP only supports GET and POST methods.
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -105,12 +105,12 @@ function graphqlHTTP(options) {
       }
 
       // GraphQL source.
-      var source = new _graphqlLanguage.Source(query, 'GraphQL request');
+      var source = new _graphql.Source(query, 'GraphQL request');
 
       // Parse source to AST, reporting any syntax error.
       var documentAST = undefined;
       try {
-        documentAST = (0, _graphqlLanguage.parse)(source);
+        documentAST = (0, _graphql.parse)(source);
       } catch (syntaxError) {
         // Return 400: Bad Request if any syntax errors errors exist.
         response.status(400);
@@ -118,7 +118,7 @@ function graphqlHTTP(options) {
       }
 
       // Validate AST, reporting any errors.
-      var validationErrors = (0, _graphqlValidation.validate)(schema, documentAST);
+      var validationErrors = (0, _graphql.validate)(schema, documentAST, validationRules);
       if (validationErrors.length > 0) {
         // Return 400: Bad Request if any validation errors exist.
         response.status(400);
@@ -128,7 +128,7 @@ function graphqlHTTP(options) {
       // Only query operations are allowed on GET requests.
       if (request.method === 'GET') {
         // Determine if this GET request will perform a non-query.
-        var operationAST = (0, _graphqlUtilitiesGetOperationAST.getOperationAST)(documentAST, operationName);
+        var operationAST = (0, _graphql.getOperationAST)(documentAST, operationName);
         if (operationAST && operationAST.operation !== 'query') {
           // If GraphiQL can be shown, do not perform this query, but
           // provide it to GraphiQL so that the requester may perform it
@@ -146,7 +146,7 @@ function graphqlHTTP(options) {
       rootValue && (rootValue.startedAt = new Date().getTime());
       // Perform the execution, reporting any errors creating the context.
       try {
-        return (0, _graphqlExecution.execute)(schema, documentAST, rootValue, variables, operationName);
+        return (0, _graphql.execute)(schema, documentAST, rootValue, variables, operationName);
       } catch (contextError) {
         // Return 400: Bad Request if any execution context errors exist.
         response.status(400);
@@ -159,7 +159,7 @@ function graphqlHTTP(options) {
     }).then(function (result) {
       // Format any encountered errors.
       if (result && result.errors) {
-        result.errors = result.errors.map(_graphqlError.formatError);
+        result.errors = result.errors.map(formatErrorFn || _graphql.formatError);
       }
 
       // Add timing information to response
@@ -169,7 +169,7 @@ function graphqlHTTP(options) {
 
       // If allowed to show GraphiQL, present it instead of JSON.
       if (showGraphiQL) {
-        response.set('Content-Type', 'text/html').send((0, _renderGraphiQL.renderGraphiQL)({ query: query, variables: variables, result: result }));
+        response.set('Content-Type', 'text/html').send((0, _renderGraphiQL.renderGraphiQL)({ query: query, variables: variables, operationName: operationName, result: result }));
       } else {
         // Otherwise, present JSON directly.
         response.set('Content-Type', 'application/json').send(JSON.stringify(result, null, pretty ? 2 : 0));
@@ -244,5 +244,16 @@ module.exports = exports['default'];
  */
 
 /**
- * A boolean to optionally enable GraphiQL mode
+ * An optional function which will be used to format any errors produced by
+ * fulfilling a GraphQL operation. If no function is provided, GraphQL's
+ * default spec-compliant `formatError` function will be used.
+ */
+
+/**
+ * An optional array of validation rules that will be applied on the document
+ * in additional to those defined by the GraphQL spec.
+ */
+
+/**
+ * A boolean to optionally enable GraphiQL mode.
  */
