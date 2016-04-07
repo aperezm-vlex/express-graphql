@@ -204,7 +204,7 @@ export default function graphqlHTTP(options: Options): Middleware {
       }
 
       // Add timing information to response
-      if (rootValue && rootValue.response && rootValue.response.timing) {
+      if (result && rootValue && rootValue.response && rootValue.response.timing) {
         result.timing = Object.assign({duration: (new Date().getTime() - rootValue.startedAt) / 1000}, rootValue.response.timing);
       }
 
